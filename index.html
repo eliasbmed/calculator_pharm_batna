@@ -18,7 +18,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@700&display=swap" rel="stylesheet">
 
-
   <style>
     /* ------------------------------------------------------------------
         TYPO & GLOBAL
@@ -75,6 +74,24 @@
     .input-cell::-webkit-outer-spin-button,
     .input-cell::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     .input-cell[type=number] { -moz-appearance:textfield; }
+
+    /* Save indicator */
+    .save-indicator {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #10b981;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: 1000;
+    }
+    .save-indicator.show {
+      opacity: 1;
+    }
   </style>
 
   <!-- Logic -->
@@ -83,6 +100,68 @@
       'biophysique': 2, 'botanique': 2, 'chimie-analytique': 2, 'chimie-minerale': 2,
       'genetique': 2, 'biochimie': 2, 'physiopathologie': 2, 'culture-generale': 1
     };
+
+    const STORAGE_KEY = 'pharm_batna_grades';
+    let saveTimeout;
+
+    // --- STORAGE FUNCTIONS ---
+    function saveGrades() {
+      const grades = {};
+      document.querySelectorAll('input[type="number"]').forEach(input => {
+        const subject = input.getAttribute('data-subject');
+        const type = input.getAttribute('data-semester') ? 
+          `semester-${input.getAttribute('data-semester')}` : 
+          input.getAttribute('data-type');
+        
+        if (!grades[subject]) grades[subject] = {};
+        grades[subject][type] = input.value;
+      });
+      
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(grades));
+        showSaveIndicator();
+      } catch (e) {
+        console.warn('Could not save grades to localStorage:', e);
+      }
+    }
+
+    function loadGrades() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const grades = JSON.parse(saved);
+          Object.keys(grades).forEach(subject => {
+            Object.keys(grades[subject]).forEach(type => {
+              let input;
+              if (type.startsWith('semester-')) {
+                const semester = type.replace('semester-', '');
+                input = document.querySelector(`input[data-subject="${subject}"][data-semester="${semester}"]`);
+              } else {
+                input = document.querySelector(`input[data-subject="${subject}"][data-type="${type}"]`);
+              }
+              if (input) {
+                input.value = grades[subject][type] || 0;
+              }
+            });
+          });
+        }
+      } catch (e) {
+        console.warn('Could not load grades from localStorage:', e);
+      }
+    }
+
+    function showSaveIndicator() {
+      const indicator = document.getElementById('save-indicator');
+      indicator.classList.add('show');
+      setTimeout(() => {
+        indicator.classList.remove('show');
+      }, 2000);
+    }
+
+    function debouncedSave() {
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(saveGrades, 500);
+    }
 
     // --- SETUP AND EVENT LISTENERS ---
     function buildRows() {
@@ -97,8 +176,14 @@
 
     function attachListeners() {
       document.querySelectorAll('input[type="number"]').forEach(i => {
-        i.addEventListener('input', calculateAll);
-        i.addEventListener('change', calculateAll);
+        i.addEventListener('input', () => {
+          calculateAll();
+          debouncedSave();
+        });
+        i.addEventListener('change', () => {
+          calculateAll();
+          debouncedSave();
+        });
       });
       document.getElementById('celebration-modal').addEventListener('click', () => {
         document.getElementById('celebration-modal').classList.add('hidden');
@@ -151,8 +236,11 @@
     }
 
     function resetAll() {
-      document.querySelectorAll('input[type="number"]').forEach(i => i.value = 0);
-      calculateAll();
+      if (confirm('Êtes-vous sûr de vouloir réinitialiser toutes les notes ? Cette action supprimera toutes les données sauvegardées.')) {
+        document.querySelectorAll('input[type="number"]').forEach(i => i.value = 0);
+        localStorage.removeItem(STORAGE_KEY);
+        calculateAll();
+      }
     }
 
     // --- PDF EXPORT ---
@@ -254,16 +342,23 @@
     window.addEventListener('DOMContentLoaded', () => { 
         buildRows(); 
         attachListeners(); 
+        loadGrades(); // Load saved grades
         calculateAll(); 
     });
   </script>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-indigo-400 to-purple-600 flex items-center justify-center p-6">
+  <!-- Save Indicator -->
+  <div id="save-indicator" class="save-indicator">
+    ✓ Notes sauvegardées
+  </div>
+
   <div id="app" class="glass w-full max-w-6xl p-6 md:p-8">
     <!-- Header -->
     <header class="text-center mb-8">
       <h1 class="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white">Calculateur de Moyenne 2ᵉ PharmBatna</h1>
       <p class="text-gray-700 dark:text-gray-300 mt-2">Calculez votre moyenne générale facilement ✨</p>
+      <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Vos notes sont sauvegardées automatiquement</p>
     </header>
 
     <!-- Table Container -->
