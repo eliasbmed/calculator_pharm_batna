@@ -62,7 +62,7 @@
 
     .total-row  { background:#d0d0d0; color:#000; font-weight:bold; }
 
-    /* Custom styles for number inputs */
+    /* Custom styles for text inputs */
     .input-cell {
       width:100%;
       background:transparent;
@@ -71,6 +71,7 @@
       outline:none;
       border:none;
     }
+    
     .input-cell::placeholder {
       color: rgba(0, 0, 0, 0.4);
       font-weight: normal;
@@ -78,10 +79,9 @@
     .s2-bg .input-cell::placeholder {
       color: rgba(255, 255, 255, 0.6);
     }
-    /* Hide number input spinners */
-    .input-cell::-webkit-outer-spin-button,
-    .input-cell::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-    .input-cell[type=number] { -moz-appearance:textfield; }
+    .s2-bg .input-cell {
+      color: #fff !important;
+    }
 
     /* Save indicator */
     .save-indicator {
@@ -118,13 +118,55 @@
     }
 
     function parseNumberFrench(str) {
+      if (!str || str.trim() === '') return 0;
+      // Handle both comma and dot as decimal separators
       return parseFloat(str.replace(',', '.')) || 0;
+    }
+
+    function validateAndFormatInput(value) {
+      // Remove any characters that aren't digits, comma, or dot
+      let cleaned = value.replace(/[^0-9.,]/g, '');
+      
+      // Handle multiple decimal separators
+      const commaCount = (cleaned.match(/,/g) || []).length;
+      const dotCount = (cleaned.match(/\./g) || []).length;
+      
+      // If multiple commas, keep only the last one
+      if (commaCount > 1) {
+        const parts = cleaned.split(',');
+        cleaned = parts.slice(0, -1).join('') + ',' + parts[parts.length - 1];
+      }
+      
+      // If multiple dots, keep only the last one
+      if (dotCount > 1) {
+        const parts = cleaned.split('.');
+        cleaned = parts.slice(0, -1).join('') + '.' + parts[parts.length - 1];
+      }
+      
+      // If both comma and dot exist, keep the last one typed
+      if (commaCount > 0 && dotCount > 0) {
+        const lastComma = cleaned.lastIndexOf(',');
+        const lastDot = cleaned.lastIndexOf('.');
+        if (lastComma > lastDot) {
+          cleaned = cleaned.replace(/\./g, '');
+        } else {
+          cleaned = cleaned.replace(/,/g, '');
+        }
+      }
+      
+      return cleaned;
+    }
+
+    function clampGrade(value) {
+      const num = parseNumberFrench(value);
+      if (isNaN(num)) return 0;
+      return Math.max(0, Math.min(20, num));
     }
 
     // --- STORAGE FUNCTIONS ---
     function saveGrades() {
       const grades = {};
-      document.querySelectorAll('input[type="number"]').forEach(input => {
+      document.querySelectorAll('input[type="text"]').forEach(input => {
         const subject = input.getAttribute('data-subject');
         const type = input.getAttribute('data-semester') ? 
           `semester-${input.getAttribute('data-semester')}` : 
@@ -192,43 +234,57 @@
     }
 
     function attachListeners() {
-      document.querySelectorAll('input[type="number"]').forEach(input => {
-        // Handle focus to clear placeholder behavior
+      document.querySelectorAll('input[type="text"]').forEach(input => {
+        // Handle focus to clear zero value
         input.addEventListener('focus', function() {
-          if (this.value === '0' || this.value === '') {
+          if (this.value === '0') {
             this.value = '';
           }
         });
 
-        // Handle blur to restore 0 if empty
+        // Handle blur to validate, format, and restore zero if empty
         input.addEventListener('blur', function() {
-          if (this.value === '') {
+          if (this.value === '' || this.value.trim() === '') {
             this.value = '0';
+          } else {
+            // Validate and clamp the value
+            const numValue = clampGrade(this.value);
+            // Format with French decimal separator
+            this.value = formatNumberFrench(numValue);
           }
-          // Validate max value
-          if (parseFloat(this.value) > 20) {
-            this.value = '20';
-          }
+          calculateAll();
+          debouncedSave();
         });
 
-        // Handle input validation
+        // Handle real-time input validation
         input.addEventListener('input', function() {
-          // Remove any non-numeric characters except comma and dot
-          this.value = this.value.replace(/[^0-9.,]/g, '');
+          const originalValue = this.value;
+          const cursorPosition = this.selectionStart;
           
-          // Convert comma to dot for calculation
-          const numValue = parseFloat(this.value.replace(',', '.'));
-          if (numValue > 20) {
-            this.value = '20';
+          // Validate and clean input
+          this.value = validateAndFormatInput(this.value);
+          
+          // Restore cursor position if possible
+          if (this.value.length >= cursorPosition) {
+            this.setSelectionRange(cursorPosition, cursorPosition);
           }
           
-          calculateAll();
-          debouncedSave();
+          // Real-time calculation (only if value is not empty)
+          if (this.value !== '') {
+            calculateAll();
+            debouncedSave();
+          }
         });
 
-        input.addEventListener('change', function() {
-          calculateAll();
-          debouncedSave();
+        // Handle paste events
+        input.addEventListener('paste', function(e) {
+          setTimeout(() => {
+            this.value = validateAndFormatInput(this.value);
+            const numValue = clampGrade(this.value);
+            this.value = formatNumberFrench(numValue);
+            calculateAll();
+            debouncedSave();
+          }, 0);
         });
       });
 
@@ -288,7 +344,7 @@
 
     function resetAll() {
       if (confirm('Êtes-vous sûr de vouloir réinitialiser toutes les notes ? Cette action supprimera toutes les données sauvegardées.')) {
-        document.querySelectorAll('input[type="number"]').forEach(i => i.value = '0');
+        document.querySelectorAll('input[type="text"]').forEach(i => i.value = '0');
         localStorage.removeItem(STORAGE_KEY);
         calculateAll();
       }
@@ -431,9 +487,9 @@
             <% sujets.forEach(s => { %>
               <tr class="border-t border-gray-200/50 dark:border-gray-700/50">
                 <td class="subject-bg font-semibold text-left pl-3 py-2"><%= s.label %></td>
-                <td class="s1-bg"><input type="number" min="0" max="20" step="0.01" value="0" placeholder="Note" data-subject="<%= s.key %>" data-semester="1" class="input-cell p-2"/></td>
-                <td class="s2-bg"><input type="number" min="0" max="20" step="0.01" value="0" placeholder="Note" data-subject="<%= s.key %>" data-semester="2" class="input-cell p-2 text-white"/></td>
-                <td class="tdtp-bg"><input type="number" min="0" max="20" step="0.01" value="0" placeholder="Note" data-subject="<%= s.key %>" data-type="tdtp" class="input-cell p-2"/></td>
+                <td class="s1-bg"><input type="text" value="0" placeholder="Note" data-subject="<%= s.key %>" data-semester="1" class="input-cell p-2"/></td>
+                <td class="s2-bg"><input type="text" value="0" placeholder="Note" data-subject="<%= s.key %>" data-semester="2" class="input-cell p-2"/></td>
+                <td class="tdtp-bg"><input type="text" value="0" placeholder="Note" data-subject="<%= s.key %>" data-type="tdtp" class="input-cell p-2"/></td>
                 <td id="avg-<%= s.key %>"   class="avg-bg font-medium">0,00</td>
                 <td id="coeff-<%= s.key %>" class="coeff-bg font-medium">0,00</td>
               </tr>
